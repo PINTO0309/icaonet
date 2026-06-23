@@ -14,6 +14,22 @@ python predict.py path/to/image.png
 
 or you can run the [Inference Notebook][inference-notebook].
 
+# Export TensorFlow 2 SavedModel
+
+The inference notebook loads `resources/models/icaonet.h5` after face detection,
+crop, resize to `160x160`, and normalization to `0..1`. To export the ICAONet
+inference model as a TensorFlow 2 SavedModel:
+
+```sh
+python export_saved_model.py
+```
+
+This writes `resources/models/icaonet_saved_model`. The default serving
+signature expects a float32 tensor named `image` with shape
+`[batch, 160, 160, 3]`, already cropped/resized and normalized to `0..1`.
+An additional `from_uint8` signature accepts a uint8 tensor named `image_uint8`
+with the same shape and normalizes it internally.
+
 # Thesis
 
 - [Overleaf][overleaf]
