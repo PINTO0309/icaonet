@@ -14,6 +14,94 @@ python predict.py path/to/image.png
 
 or you can run the [Inference Notebook][inference-notebook].
 
+# Running ONNX/TFLite Pipeline
+
+`predict_onnx_tflite.py` runs a full ONNX/TFLite inference pipeline without the
+TensorFlow/Keras `h5` model. It detects only classid `7` (`Head`) with
+`resources/models/yolomit_t_wholebody28_1x3x480x640.onnx`, square-crops the
+detected head without the `1.5x` expansion used by `predict.py`, resizes the
+crop to `160x160`, saves it as `data/test_160x160.png`, and runs ICAONet.
+
+```bash
+python predict_onnx_tflite.py
+```
+
+The default command is equivalent to:
+
+```bash
+python predict_onnx_tflite.py \
+--image data/test.png \
+--detector resources/models/yolomit_t_wholebody28_1x3x480x640.onnx \
+--backend onnx \
+--icaonet-onnx resources/models/icaonet_1x3x160x160.onnx \
+--icaonet-tflite resources/models/saved_model_icaonet_1x3x160x160/icaonet_1x3x160x160_float32.tflite \
+--class-id 7 \
+--score-threshold 0.25 \
+--iou-threshold 0.45 \
+--crop-output data/test_160x160.png
+```
+
+Choose the ICAONet runtime with `--backend`:
+
+```bash
+python predict_onnx_tflite.py --backend onnx
+python predict_onnx_tflite.py --backend tflite
+python predict_onnx_tflite.py --backend both
+```
+
+`--backend both` prints ONNX and TFLite `output_reqs` and their
+`max_abs_diff`. The TFLite path uses `ai_edge_litert.Interpreter` first and
+falls back to `tflite_runtime.Interpreter`; it does not import TensorFlow.
+
+The script prints the selected Head detection score, the detected `xyxy` box,
+the square crop box, the saved `160x160` crop path, and each ICAONet
+`output_reqs` score with its ICAO requirement id and description. Use
+`--crop-output ""` to skip writing the crop image.
+
+The `output_reqs` values are sigmoid scores in the `0..1` range. In this
+repository's helper API, a higher value means the image is judged more
+compliant for that requirement, not that the problem named by the label is more
+severe. With the default threshold convention, `score >= 0.5` is treated as
+compliant and `score < 0.5` is treated as non-compliant. If you want a
+problem-oriented score for labels such as `Blurred`, `Pixelation`, or
+`Varied background`, read it as approximately `1.0 - score`.
+
+```
+python predict_onnx_tflite.py --backend onnx
+
+Selected Head detection
+score: 0.946571
+xyxy: [296.45391845703125, 147.14996337890625, 437.19793701171875, 335.9950866699219]
+square_xyxy: [272.40338134765625, 147.14996337890625, 461.24847412109375, 335.9950866699219]
+
+crop_output: data/test_160x160.png
+
+Backend: onnx
+[02] Blurred: 0.20035028457641602
+[03] Looking away: 0.9776184558868408
+[04] Ink marked/creased: 0.9997095465660095
+[05] Unnatural skin tone: 0.504340648651123
+[06] Too dark/light: 0.9961643218994141
+[07] Washed out: 0.9980594515800476
+[08] Pixelation: 0.9310570955276489
+[09] Hair across eyes: 0.9962046146392822
+[10] Eyes closed: 0.9938639402389526
+[11] Varied background: 0.014305025339126587
+[12] Roll/pitch/yaw rotations greater than a predefined thresholds: 0.7484405040740967
+[13] Flash reflection on skin: 0.623089611530304
+[14] Red eyes: 0.9961295127868652
+[15] Shadows behind head: 0.2613902986049652
+[16] Shadows across face: 0.7242169380187988
+[17] Dark tinted lenses: 0.9999758005142212
+[18] Flash reflection on lenses: 0.9811655282974243
+[19] Frames too heavy: 0.9974024295806885
+[20] Frame covering eyes: 0.7655755281448364
+[21] Hat/cap: 0.0012105703353881836
+[22] Veil over face: 0.9999406337738037
+[23] Mouth open: 0.9977437257766724
+[24] Presence of other faces or toys too close to face: 0.9756643176078796
+```
+
 # Export TensorFlow 2 SavedModels
 
 `export_saved_model.py` exports four TensorFlow 2 SavedModels from
@@ -109,6 +197,14 @@ reqs = PhotographicRequirements(*y_reqs.squeeze())
 print(reqs.blurred.value)
 print(reqs.blurred.is_compliant(threshold=0.5))
 ```
+
+`Requirement.is_compliant(threshold)` returns `True` when the score is greater
+than or equal to the threshold. Therefore high `output_reqs` values should be
+read as "passes this requirement" under the repository convention. For example,
+`[08] Pixelation: 0.93` means the image is likely compliant with respect to
+pixelation, while `[11] Varied background: 0.01` means it is likely
+non-compliant for the background requirement. These scores are model outputs,
+not calibrated probabilities.
 
 `output_eyes` is normalized by the input size. Convert it back to pixel
 coordinates by multiplying by `160`:

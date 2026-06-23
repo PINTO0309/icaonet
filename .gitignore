@@ -117,7 +117,9 @@ venv.bak/
 
 # custom
 *Rubbish*
-data/
+data/*
+!data/test.png
+!data/test_160x160.png
 models/
 **/mlruns/**
 logs/
