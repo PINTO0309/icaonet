@@ -89,9 +89,12 @@ def preprocessing(bgr_image):
     return im_res[t:b, l:r]
 
 
-def run_icaonet(filepath):
+def run_icaonet(filepath, skip_preprocessing=False):
     im = cv2.imread(filepath, cv2.IMREAD_ANYCOLOR)
-    im = preprocessing(im)
+    if im is None:
+        raise FileNotFoundError(f"Could not read image: {filepath}")
+    if not skip_preprocessing:
+        im = preprocessing(im)
     im = cv2.resize(im, IMAGE_SIZE, interpolation=cv2.INTER_AREA).astype(np.float32)
     im = np.expand_dims(im, axis=0)
 
@@ -102,7 +105,15 @@ def run_icaonet(filepath):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("filepath")
+    parser.add_argument(
+        "--skip-preprocessing",
+        action="store_true",
+        help=(
+            "Treat filepath as an already-cropped ICAONet input image. "
+            "The image is only resized to 160x160 and normalized."
+        ),
+    )
     args = parser.parse_args()
 
-    y_pred = run_icaonet(args.filepath)
+    y_pred = run_icaonet(args.filepath, skip_preprocessing=args.skip_preprocessing)
     print(y_pred)

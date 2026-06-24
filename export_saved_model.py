@@ -112,19 +112,57 @@ class ICAONetSavedModel(tf.Module):
 
 def load_source_model(h5_model_path):
     model = tf.keras.models.load_model(h5_model_path, compile=False)
-    missing = [
-        branch
-        for branch in ("decoded", "output_reqs", "output_eyes", "output_pixelation")
-        if branch not in {layer.name for layer in model.layers}
-    ]
-    if missing:
-        raise ValueError(
-            f"{h5_model_path} is missing required branch layer(s): {', '.join(missing)}"
-        )
     return model
 
 
+def get_supported_export_specs(source_model):
+    layer_names = {layer.name for layer in source_model.layers}
+    supported = []
+    skipped = []
+
+    for spec in EXPORT_SPECS:
+        if all(branch in layer_names for branch in spec.branches):
+            supported.append(spec)
+        else:
+            skipped.append(spec)
+
+    if supported:
+        return tuple(supported), tuple(skipped)
+
+    if len(source_model.outputs) == 1:
+        return (
+            (
+                ExportSpec(
+                    name="output_reqs",
+                    output_dir="saved_model_icaonet_output_reqs",
+                    branches=("output_reqs",),
+                ),
+            ),
+            tuple(EXPORT_SPECS),
+        )
+
+    missing = sorted(
+        {
+            branch
+            for spec in EXPORT_SPECS
+            for branch in spec.branches
+            if branch not in layer_names
+        }
+    )
+    raise ValueError(
+        "Could not determine export specs for model. Missing branch layer(s): "
+        + ", ".join(missing)
+    )
+
+
 def make_branch_model(source_model, branches):
+    if len(source_model.outputs) == 1 and branches == ("output_reqs",):
+        return tf.keras.Model(
+            inputs=source_model.inputs,
+            outputs=source_model.outputs[0],
+            name="ICAONet_output_reqs",
+        )
+
     outputs = [source_model.get_layer(branch).output for branch in branches]
     if len(outputs) == 1:
         outputs = outputs[0]
@@ -165,13 +203,14 @@ def save_branch_model(source_model, spec, output_root, input_color_order, overwr
 
 def export_all_saved_models(h5_model_path, output_root, input_color_order, overwrite):
     source_model = load_source_model(h5_model_path)
+    export_specs, skipped_specs = get_supported_export_specs(source_model)
     exported = []
-    for spec in EXPORT_SPECS:
+    for spec in export_specs:
         export_path = save_branch_model(
             source_model, spec, output_root, input_color_order, overwrite
         )
         exported.append((spec, export_path))
-    return exported
+    return exported, skipped_specs
 
 
 def parse_args():
@@ -185,8 +224,9 @@ def parse_args():
         "--h5-model",
         default=DEFAULT_H5_MODEL,
         help=(
-            "Path to the Keras h5 ICAONet model with decoder and all inference "
-            "branches."
+            "Path to the Keras h5 ICAONet model. Decoder/multitask models export "
+            "all supported branches; single-output 23-score models are exported "
+            "as output_reqs."
         ),
     )
     parser.add_argument(
@@ -224,7 +264,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    exported_models = export_all_saved_models(
+    exported_models, skipped_specs = export_all_saved_models(
         h5_model_path=args.h5_model,
         output_root=args.output_root,
         input_color_order=args.input_color_order,
@@ -234,4 +274,9 @@ if __name__ == "__main__":
         print(
             f"{spec.name}: {export_path} "
             f"({', '.join(spec.branches)}; input={args.input_color_order})"
+        )
+    for spec in skipped_specs:
+        print(
+            f"skipped {spec.name}: missing branch layer(s) for "
+            f"{', '.join(spec.branches)}"
         )

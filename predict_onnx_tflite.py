@@ -285,7 +285,7 @@ def run_icaonet_tflite(crop_rgb: np.ndarray, model_path: str) -> Tuple[np.ndarra
     return output.astype(np.float32), runtime_name
 
 
-def print_requirements(output_reqs: np.ndarray) -> None:
+def print_requirements(output_reqs: np.ndarray, threshold: float) -> None:
     values = output_reqs.squeeze()
     if values.shape != (len(REQUIREMENTS),):
         raise ValueError(
@@ -293,7 +293,15 @@ def print_requirements(output_reqs: np.ndarray) -> None:
             f"got {output_reqs.shape}"
         )
     for (requirement_id, description), value in zip(REQUIREMENTS, values):
-        print(f"[{requirement_id:02}] {description}: {float(value)}")
+        compliance_score = float(value)
+        issue_score = 1.0 - compliance_score
+        status = "PASS" if compliance_score >= threshold else "FAIL"
+        print(
+            f"[{requirement_id:02}] {description}: "
+            f"compliance_score={compliance_score:.9f}, "
+            f"issue_score={issue_score:.9f}, "
+            f"status={status}"
+        )
 
 
 def print_detection(detection: Detection, crop_result: CropResult) -> None:
@@ -333,7 +341,7 @@ def run(args: argparse.Namespace) -> None:
     if args.backend in ("onnx", "both"):
         onnx_output = run_icaonet_onnx(crop_result.image_rgb, args.icaonet_onnx)
         print("Backend: onnx")
-        print_requirements(onnx_output)
+        print_requirements(onnx_output, args.requirement_threshold)
         print()
 
     if args.backend in ("tflite", "both"):
@@ -341,7 +349,7 @@ def run(args: argparse.Namespace) -> None:
             crop_result.image_rgb, args.icaonet_tflite
         )
         print(f"Backend: tflite ({runtime_name})")
-        print_requirements(tflite_output)
+        print_requirements(tflite_output, args.requirement_threshold)
         print()
 
     if args.backend == "both" and onnx_output is not None and tflite_output is not None:
@@ -363,6 +371,15 @@ def parse_args(argv: Sequence[str] = None) -> argparse.Namespace:
     parser.add_argument("--icaonet-tflite", default=DEFAULT_ICAONET_TFLITE)
     parser.add_argument("--score-threshold", type=float, default=0.25)
     parser.add_argument("--iou-threshold", type=float, default=0.45)
+    parser.add_argument(
+        "--requirement-threshold",
+        type=float,
+        default=0.5,
+        help=(
+            "Threshold used to print PASS/FAIL from ICAONet compliance scores. "
+            "The raw model output is a compliance score; issue_score is 1-score."
+        ),
+    )
     parser.add_argument("--class-id", type=int, default=HEAD_CLASS_ID)
     parser.add_argument(
         "--crop-output",
